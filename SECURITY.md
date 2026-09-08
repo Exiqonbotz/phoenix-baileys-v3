@@ -1,78 +1,120 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Supported Versions
 
-**Do not file security issues as public GitHub issues, Discord posts, or PRs.** A public report is itself an exploit broadcast — many downstream projects pull Baileys directly from `master` or from `github:WhiskeySockets/Baileys`, so a vulnerable version is in the wild within minutes.
-
-Use either of these private channels:
-
-1. **Preferred:** [GitHub Security Advisories](https://github.com/WhiskeySockets/Baileys/security/advisories/new) on this repository. This gives us a private workspace to coordinate the fix, draft a CVE, and notify downstream projects.
-2. **Email:** **rajeh@reforward.dev** — Rajeh Taher, current maintainer. Use this if GitHub Advisories is unavailable, or if the report involves the maintainer's keys / accounts directly.
-
-If you don't get an acknowledgement within **72 hours**, please re-send — mail filtering does occasionally swallow security reports.
-
-## What to include
-
-A useful report contains:
-
-- **Affected versions** (commit SHA or release tag)
-- **Component**: socket, signal/crypto, auth state, message decoding, media handling, etc.
-- **Impact**: what an attacker can do (read messages, hijack sessions, impersonate, DoS, etc.) and under what preconditions
-- **Reproduction**: minimal code, captured stanza, or a deterministic test case. If repro requires a paired account or live connection, describe the setup instead — don't attach session state.
-- **Suggested fix** (optional but appreciated)
-
-If a fix touches the wire protocol or signal-protocol session state, please flag that explicitly — those changes need extra coordination because they affect persisted state on every downstream user.
-
-## What we treat as a vulnerability
-
-In scope:
-
-- Auth state / key store leakage or downgrade
-- Session, prekey, or sender-key handling that lets a remote party impersonate, replay, or decrypt outside the intended audience
-- Memory corruption / RCE via crafted stanzas, media, or protobuf payloads
-- Logic bugs that bypass intended access controls (e.g., reading messages from chats the local account isn't part of)
-- Vulnerabilities in dependencies that are reachable through Baileys' public API
-- Information disclosure (PII, message content, JIDs/phone numbers, tokens) through logs or error messages on default configurations
-
-Out of scope (please file as regular issues or PRs):
-
-- Bugs that only affect availability of the local process (a malformed input that throws an exception in your handler is not a CVE; a malformed input that lets a remote party crash any Baileys client is)
-- Issues in third-party WhatsApp clones or forks of Baileys
-- Behavior of WhatsApp itself — we don't control the server; report those to Meta
-- Missing rate limiting in *your* application — Baileys doesn't add rate limiting on top of WhatsApp's
-- Reports that boil down to "the library can be misused for spam." See `CODE_OF_CONDUCT.md` § Project-Specific Conduct; that's a contributions matter, not a vulnerability.
-
-## Coordinated disclosure
-
-Our default timeline:
-
-| Day | Step |
-|---|---|
-| 0 | Report received, acknowledged within 72h |
-| ≤ 7 | Initial assessment shared with reporter; severity and rough timeline agreed |
-| ≤ 30 | Fix prepared on a private branch; reporter invited to validate if they want |
-| Coordinated date | Fix merged, release published, advisory + CVE published |
-
-If you need to disclose sooner (e.g., active exploitation in the wild), tell us — we'll prioritize accordingly. If a fix is taking longer than 30 days, we'll keep you updated and explain why.
-
-We're happy to credit reporters in the advisory. Tell us how you'd like to be credited (name, handle, organization) or if you'd prefer to remain anonymous.
-
-## Supported versions
-
-Security fixes are backported to the **latest minor release line**. Older majors (≤ 6.x) are unmaintained — please upgrade. The `master` branch is also patched immediately, but downstream pinning to `master` is at your own risk for stability.
+Phoenix Baileys V3 is currently in beta.
 
 | Version | Supported |
 |---|---|
-| `7.x` (current) | ✅ |
-| `< 7.0` | ❌ |
+| 3.0.0-beta.1 | Yes |
+| Older Phoenix Baileys V3 versions | No |
+| Phoenix Baileys V2 | No |
 
-## Operational security for users
+Only the latest Phoenix Baileys V3 release is considered supported for security fixes.
 
-A few notes for downstream users — these aren't vulnerabilities in Baileys, but they are common ways production systems leak:
+## Reporting a Vulnerability
 
-- **`baileys_auth_info/` is equivalent to a long-lived credential.** Store it like an SSH private key. Don't commit it. Don't put it in container images. Encrypt it at rest if you can.
-- **Logs leak.** The default logger emits debug-level information that includes JIDs and message metadata. Set `level: 'silent'` or filter aggressively in production.
-- **Don't paste auth state into AI tools, screenshots, or support tickets.** It's not redactable — anyone with the directory contents can hijack the session.
-- **Pin a release.** Pulling `github:WhiskeySockets/Baileys` always grabs `master`. Use a tagged release in production.
+Please do not publish sensitive vulnerability details in a public issue.
 
-For non-security questions, see Discord (https://discord.gg/WeJM5FP9GG) or the wiki (https://baileys.wiki).
+Preferred reporting method:
+
+1. Open the GitHub repository for Phoenix Baileys V3.
+2. Go to the repository Security section.
+3. Use GitHub's private vulnerability reporting / security advisory feature when available.
+4. Include enough information to reproduce and assess the issue.
+
+A useful report should contain:
+
+- affected Phoenix Baileys V3 version
+- affected file or component
+- reproduction steps
+- expected behavior
+- actual behavior
+- security impact
+- logs or proof of concept when appropriate
+
+Do not include real WhatsApp session credentials, authentication state, private keys, tokens, passwords, or personal user data.
+
+If private vulnerability reporting is not available, open a minimal public issue asking for a private contact channel without publishing exploit details.
+
+## Scope
+
+Security reports are especially relevant when they involve:
+
+- authentication or session handling
+- credential exposure
+- unintended access to WhatsApp account state
+- cryptographic or Signal protocol handling
+- LID / PN identity mapping
+- message integrity
+- unsafe file or media handling
+- remote code execution
+- dependency vulnerabilities with a practical impact on Phoenix Baileys V3
+- Phoenix-specific patches such as PHX-001 or PHX-002
+
+## Out of Scope
+
+The following are generally not considered Phoenix Baileys V3 security vulnerabilities by themselves:
+
+- WhatsApp account bans or restrictions
+- undocumented WhatsApp behavior changing
+- upstream Baileys bugs that are not caused or worsened by a Phoenix-specific change
+- theoretical dependency findings without a demonstrated impact
+- social engineering
+- exposed credentials that were committed or shared by an application using the library
+- application-level vulnerabilities in projects that depend on Phoenix Baileys V3 but are unrelated to this library
+
+Upstream issues should be reported to the upstream Baileys project when the problem exists unchanged in upstream Baileys.
+
+## Phoenix-Specific Patches
+
+Phoenix-specific changes are documented in:
+
+```text
+PHOENIX_PATCHES.md
+```
+
+When a security issue is caused by a Phoenix-specific patch, the affected patch ID should be included in the report when known.
+
+Examples:
+
+```text
+PHX-001
+PHX-002
+```
+
+## Disclosure
+
+Please allow time for the issue to be investigated and fixed before publishing technical details.
+
+When appropriate, a fix may include:
+
+- a Phoenix Baileys V3 patch release
+- regression tests
+- an update to `PHOENIX_PATCHES.md`
+- an update to `CHANGELOG.md`
+- an upstream report when the issue also affects Baileys
+
+## Secrets and Session Data
+
+Never attach real WhatsApp session data to a security report.
+
+This includes files such as:
+
+```text
+creds.json
+session-*.json
+pre-key-*.json
+sender-key-*.json
+identity-key-*.json
+app-state-sync-*.json
+tctoken-*.json
+```
+
+Always sanitize logs and reproduction data before sharing them.
+
+## Upstream
+
+Phoenix Baileys V3 is based on Baileys.
+
+If a vulnerability is confirmed to exist in upstream Baileys without any Phoenix-specific cause, the issue should also be coordinated with the upstream maintainers where appropriate.

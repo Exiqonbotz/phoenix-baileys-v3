@@ -1,4 +1,6 @@
+blank_issues_enabled: false
+
 contact_links:
-  - name: Have a question?
-    about: Join our discord and send a post in the `#baileys-help` channel
-    url: https://discord.gg/WeJM5FP9GG
+  - name: Security vulnerability
+    url: https://github.com/Exiqonbotz/phoenix-baileys-v3/security
+    about: Do not publish sensitive security details in a public issue.

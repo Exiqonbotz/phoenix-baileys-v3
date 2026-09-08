@@ -1,287 +1,271 @@
 # Phoenix Baileys V3
 
-<p align="center">
-  <strong>Phoenix-maintained WhatsApp Web library based on Baileys.</strong>
-</p>
+Phoenix Baileys V3 is a Phoenix-maintained WhatsApp Web library based on Baileys.
 
-<p align="center">
-  A modern Baileys distribution focused on targeted protocol fixes,
-  clearer event semantics and stable integration with the Phoenix ecosystem.
-</p>
+The project follows upstream Baileys closely while maintaining a small set of documented Phoenix-specific patches required by the Phoenix ecosystem.
 
----
-
-> [!IMPORTANT]
-> Phoenix Baileys V3 is based on the open-source
-> [Baileys](https://github.com/WhiskeySockets/Baileys) project.
->
-> It is not affiliated with, endorsed by, or officially connected to
-> WhatsApp, Meta Platforms, Inc. or WhiskeySockets.
-
-## Status
-
-Phoenix Baileys V3 is currently under development.
-
-Current development line:
+Current version:
 
 ```text
-3.0.0-beta
+3.0.0-beta.1
+```
 
-The initial V3 release is being rebuilt from a current Baileys 7 codebase
-instead of continuing the legacy Phoenix Baileys V2 fork.
+## Goals
 
-The goal is to stay as close to upstream Baileys as possible while maintaining
-a small number of documented Phoenix-specific improvements.
+Phoenix Baileys V3 is designed around a few simple principles:
 
-Why V3?
-
-Phoenix Baileys V2 accumulated a large number of internal modifications over
-time.
-
-That made upstream updates increasingly difficult to integrate and maintain.
-
-V3 follows a different approach:
-
-Current Baileys
-      +
-small documented Phoenix patches
-      =
-Phoenix Baileys V3
-
-Instead of modifying large parts of the protocol implementation, Phoenix V3
-only changes behavior where there is a clear reason to do so.
-
-Design Goals
-Stay close to upstream Baileys
-Keep Phoenix patches small and reviewable
-Preserve modern LID / PN handling from upstream
-Avoid unnecessary protocol modifications
-Avoid AntiBan / masquerading systems
-Add regression tests for Phoenix-specific behavior
-Keep upgrades to future Baileys versions manageable
-Document every Phoenix modification
-Phoenix Patches
+- stay as close to upstream Baileys as possible
+- keep Phoenix-specific changes small and documented
+- avoid large invasive modifications
+- preserve compatibility with modern WhatsApp protocol changes
+- add regression tests for Phoenix-specific behavior
+- review every Phoenix patch when updating the upstream base
 
 Phoenix-specific modifications are documented in:
 
+```text
 PHOENIX_PATCHES.md
+```
 
-Each modification receives its own patch identifier.
+## Based on Baileys
+
+Phoenix Baileys V3 is based on the open-source Baileys project.
+
+Upstream project:
+
+```text
+WhiskeySockets/Baileys
+```
+
+Phoenix Baileys V3 is not intended to hide or replace its upstream origin.
+
+The upstream MIT license and copyright notices are preserved in this repository.
+
+## Current Phoenix Patches
+
+### PHX-001 - Group Leave / Remove distinction
+
+Phoenix preserves the distinction between:
+
+```text
+GROUP_PARTICIPANT_LEAVE
+GROUP_PARTICIPANT_REMOVE
+```
+
+Incoming group participant events emit:
+
+```text
+leave
+remove
+```
+
+instead of treating both events as `remove`.
+
+This allows applications to reliably distinguish a voluntary group leave from a participant removal.
+
+### PHX-002 - Interactive Native Flow Buttons
+
+Phoenix adds a high-level:
+
+```ts
+interactiveButtons
+```
+
+message API for WhatsApp Native Flow messages.
+
+Currently tested button types:
+
+```text
+single_select
+cta_url
+```
+
+The implementation also supports:
+
+```text
+image
+video
+mentions
+mentionAll
+contextInfo
+```
 
 Example:
 
-PHX-001
-PHX-002
-PHX-003
-
-This makes it possible to compare future Baileys releases against the exact
-changes maintained by Phoenix.
-
-Planned Initial Patch
-PHX-001 - Group Leave / Remove distinction
-
-Upstream Baileys currently emits both of these group events as:
-
-action: 'remove'
-
-even though WhatsApp itself distinguishes between:
-
-GROUP_PARTICIPANT_LEAVE
-GROUP_PARTICIPANT_REMOVE
-
-Phoenix V3 intends to preserve that distinction:
-
-GROUP_PARTICIPANT_LEAVE
--> action: "leave"
-
-GROUP_PARTICIPANT_REMOVE
--> action: "remove"
-
-This allows applications to reliably distinguish between:
-
-a participant voluntarily leaving a group
-a participant being removed by another user
-
-without relying on additional heuristics.
-
-This section describes the initial Phoenix V3 patch target while V3 is in
-development. See PHOENIX_PATCHES.md for the implemented patch status.
-
-Installation
-
-Phoenix Baileys V3 is not yet considered stable.
-
-Once published to npm:
-
-npm install phoenix-baileys-v3
-
-or:
-
-yarn add phoenix-baileys-v3
-
-During local development:
-
-git clone https://github.com/Exiqonbotz/phoenix-baileys-v3.git
-cd phoenix-baileys-v3
-yarn
-yarn build
-Usage
-
-Phoenix Baileys V3 keeps the familiar Baileys API.
-
-import makeWASocket, {
-  Browsers,
-  DisconnectReason,
-  useMultiFileAuthState
-} from 'phoenix-baileys-v3'
-
-Example:
-
-async function connect() {
-  const { state, saveCreds } = await useMultiFileAuthState('./session')
-
-  const sock = makeWASocket({
-    auth: state,
-    browser: Browsers.ubuntu('Phoenix')
-  })
-
-  sock.ev.on('creds.update', saveCreds)
-
-  sock.ev.on('connection.update', ({ connection }) => {
-    if (connection === 'open') {
-      console.log('Phoenix Baileys connected')
+```ts
+await sock.sendMessage(jid, {
+  text: 'Phoenix Menu',
+  footer: 'Vivere diu Phoenix',
+  image: {
+    url: './media/pic1.jpg'
+  },
+  interactiveButtons: [
+    {
+      name: 'single_select',
+      buttonParamsJson: {
+        title: 'Select menu',
+        sections: [
+          {
+            title: 'Phoenix',
+            rows: [
+              {
+                title: 'Main Menu',
+                id: '/menu'
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      name: 'cta_url',
+      buttonParamsJson: {
+        display_text: 'Phoenix Website',
+        url: 'https://phoenixgermany.com',
+        merchant_url: 'https://phoenixgermany.com'
+      }
     }
-  })
-
-  return sock
-}
-
-connect()
-Group Events
-sock.ev.on('group-participants.update', event => {
-  console.log(event.id)
-  console.log(event.participants)
-  console.log(event.action)
+  ]
 })
+```
 
-Phoenix-specific event behavior will be documented in
-PHOENIX_PATCHES.md.
+`buttonParamsJson` accepts either a JSON string or an object.
 
-Authentication
+Objects are automatically serialized.
 
-Multi-file authentication remains available:
+## Verification
 
-import {
-  useMultiFileAuthState
-} from 'phoenix-baileys-v3'
+Phoenix-specific changes are covered by regression tests.
 
-const { state, saveCreds } =
-  await useMultiFileAuthState('./auth')
+Current project result:
 
-const sock = makeWASocket({
-  auth: state
-})
+```text
+Test Suites: 30 passed, 30 total
+Tests:       411 passed, 411 total
+Snapshots:   0 total
+```
 
-sock.ev.on('creds.update', saveCreds)
+The TypeScript build also completes successfully.
 
-For production applications, a database-backed auth state is recommended
-instead of relying on a filesystem-based session store.
+PHX-002 has additionally been verified against the live WhatsApp service using Phoenix bots.
 
-LID / PN Handling
+## Installation
 
-Phoenix V3 uses the modern LID and phone-number mapping infrastructure provided
-by the current Baileys codebase.
+Phoenix Baileys V3 can currently be installed directly from GitHub:
 
-Legacy Phoenix V2 mapping implementations are not automatically carried into
-V3.
+```bash
+npm install github:Exiqonbotz/phoenix-baileys-v3
+```
 
-Additional Phoenix-specific mapping logic will only be introduced if real-world
-testing demonstrates that upstream behavior is insufficient.
+Example CommonJS usage:
 
-What V3 Does Not Include
+```js
+const makeWASocket = require('phoenix-baileys-v3').default
+```
 
-Phoenix V3 intentionally does not restore every feature from Phoenix Baileys V2.
+Additional exports can be imported normally:
 
-In particular, the initial V3 line does not include:
+```js
+const {
+  proto,
+  delay,
+  getContentType
+} = require('phoenix-baileys-v3')
+```
 
-legacy AntiBan wrappers
-primary-device masquerading
-the old Phoenix V2 store implementation
-large protocol rewrites
-legacy Rust bridge replacements
-undocumented compatibility hacks
-
-Old V2 functionality may be reconsidered individually when there is a real use
-case.
-
-Development
+## Development
 
 Install dependencies:
 
-yarn
+```bash
+npm install
+```
 
 Build:
 
-yarn build
+```bash
+npm run build
+```
 
-Run tests:
+Run the complete test suite:
 
-yarn test
+```bash
+npm test -- --runInBand
+```
 
-Lint:
+Run only the Phoenix group participant regression tests:
 
-yarn lint
+```bash
+node --experimental-vm-modules ./node_modules/jest/bin/jest.js phoenix-group-participants.test.ts --runInBand
+```
 
-Format:
+Run only the Phoenix interactive button regression tests:
 
-yarn format
-Upstream
+```bash
+node --experimental-vm-modules ./node_modules/jest/bin/jest.js phoenix-interactive-buttons.test.ts --runInBand
+```
 
-Phoenix Baileys V3 is based on:
+## Patch Policy
 
-Baileys by WhiskeySockets
+Every Phoenix-specific modification should receive a patch ID:
 
-https://github.com/WhiskeySockets/Baileys
+```text
+PHX-001
+PHX-002
+PHX-003
+...
+```
 
-Baileys provides the underlying WhatsApp Web protocol implementation and the
-majority of the library architecture.
+Each patch should document:
 
-Phoenix-specific modifications are maintained separately and documented so
-that differences from upstream remain transparent.
-
-Disclaimer
-
-This project is not affiliated, associated, authorized, endorsed by, or in any
-way officially connected with WhatsApp, Meta Platforms, Inc., or any of their
-subsidiaries or affiliates.
-
-WhatsApp and related names, trademarks and logos belong to their respective
-owners.
-
-Users are responsible for how they use this software.
-
-Do not use this project for spam, harassment, unauthorized bulk messaging,
-stalkerware or other abusive activity.
-
-Usage may also be subject to WhatsApp's Terms of Service.
-
-License
-
-Phoenix Baileys V3 is distributed under the MIT License.
-
-The project is based on Baileys and retains the applicable upstream copyright
-and license notices.
+- the problem
+- Phoenix behavior
+- affected files
+- tests
+- upstream compatibility considerations
 
 See:
 
+```text
+PHOENIX_PATCHES.md
+```
+
+## Upstream Updates
+
+When updating to a newer upstream Baileys version:
+
+1. Review all Phoenix patches.
+2. Check whether upstream already provides equivalent functionality.
+3. Remove obsolete Phoenix patches where possible.
+4. Reapply only the patches that are still required.
+5. Run the complete build and test suite.
+6. Perform a live Phoenix canary test before deploying broadly.
+
+The goal is to avoid maintaining duplicate behavior once upstream provides an equivalent solution.
+
+## What Phoenix Baileys V3 Does Not Do
+
+Phoenix Baileys V3 intentionally does not include the large collection of modifications previously present in Phoenix Baileys V2.
+
+V3 does not aim to provide:
+
+- AntiBan claims
+- protocol masquerading
+- unnecessary WhatsApp client spoofing
+- large undocumented patches
+- unrelated payment or business modifications
+- custom replacements for functionality already handled correctly upstream
+
+Phoenix-specific functionality should only be added when there is a concrete requirement.
+
+## License
+
+Phoenix Baileys V3 is distributed under the MIT License inherited from the upstream project.
+
+See:
+
+```text
 LICENSE
+```
 
-for the complete license text.
-
-Phoenix
-
-Phoenix Baileys V3 is maintained as part of the Phoenix ecosystem.
-
-Repository:
-
-https://github.com/Exiqonbotz/phoenix-baileys-v3
+The original upstream copyright and license notices remain preserved.

@@ -2,7 +2,7 @@ name: Update WAProto
 
 on:
   schedule:
-    - cron: '10 1 * * *'
+    - cron: "10 1 * * *"
   workflow_dispatch:
 
 permissions:
@@ -12,53 +12,83 @@ permissions:
 jobs:
   update-proto:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install Node
-        uses: actions/setup-node@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: 24
+          cache: npm
 
-      - name: Enable Corepack and Set Yarn Version
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Install proto extractor dependencies
+        run: npm ci --prefix proto-extract
+
+      - name: Extract latest WAProto
+        id: proto_info
+        shell: bash
         run: |
-          corepack enable
-          corepack prepare yarn@4.x --activate
+          npm --prefix proto-extract start | tee wa-logs.txt
 
-      - name: Install packages
+          WA_VERSION=$(perl -ne 'print $1 if /Current version\: (.+)/' wa-logs.txt)
+          WA_JS_URL=$(perl -ne 'print $1 if /Found source JS URL\: (.+)/' wa-logs.txt)
+
+          if [ -z "$WA_VERSION" ]; then
+            echo "Could not determine WhatsApp version."
+            exit 1
+          fi
+
+          {
+            echo "wa_version=$WA_VERSION"
+            echo "wa_js_url=$WA_JS_URL"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate WAProto statics
+        shell: bash
         run: |
-          yarn install --immutable
-          yarn --cwd proto-extract install --immutable
+          npx pbjs             -t static-module             --no-beautify             -w es6             --no-bundle             --no-delimited             --no-verify             --no-comments             -o WAProto/index.js             WAProto/WAProto.proto
 
-      - name: Update WAProto.proto
-        id: wa_proto_info
+          npx pbjs             -t static-module             --no-beautify             -w es6             --no-bundle             --no-delimited             --no-verify             WAProto/WAProto.proto             | npx pbts --no-comments -o WAProto/index.d.ts -
+
+          node WAProto/fix-imports.js
+
+      - name: Update WhatsApp version file
+        shell: bash
+        env:
+          WA_VERSION: ${{ steps.proto_info.outputs.wa_version }}
         run: |
-          yarn --cwd proto-extract start > wa-logs.txt
-          WA_VERSION=$(cat wa-logs.txt | perl -n -e'/Current version\: (.+)/ && print $1')
-          WA_JS_URL=$(cat wa-logs.txt | perl -n -e'/Found source JS URL\: (.+)/ && print $1')
-          echo "wa_version=$WA_VERSION" >> $GITHUB_OUTPUT
-          echo "wa_js_url=$WA_JS_URL" >> $GITHUB_OUTPUT
+          IFS='.' read -r V1 V2 V3 <<< "$WA_VERSION"
 
-      - name: GenerateStatics
-        run: yarn gen:protobuf
+          if [ -z "$V1" ] || [ -z "$V2" ] || [ -z "$V3" ]; then
+            echo "Unexpected WhatsApp version format: $WA_VERSION"
+            exit 1
+          fi
 
-      - name: Update baileys-version.json
-        run: |
-          WA_VERSION="${{steps.wa_proto_info.outputs.wa_version}}"
-          WA_NUMBERS=$(echo $WA_VERSION | sed "s/\./, /g")
-          echo -e "{\n\t\"version\": [$WA_NUMBERS]\n}" > src/Defaults/baileys-version.json
+          printf '{\n\t"version": [%s, %s, %s]\n}\n' "$V1" "$V2" "$V3"             > src/Defaults/baileys-version.json
 
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v5
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
         with:
-          commit-message: 'chore: updated proto/version to v${{steps.wa_proto_info.outputs.wa_version}}'
-          title: 'Whatsapp v${{steps.wa_proto_info.outputs.wa_version}} proto/version change'
-          branch: 'update-proto/stable'
+          commit-message: "chore: update WAProto to v${{ steps.proto_info.outputs.wa_version }}"
+          title: "chore: update WAProto to v${{ steps.proto_info.outputs.wa_version }}"
+          branch: update-proto/stable
           delete-branch: true
-          labels: 'update-proto'
-          body: "Automated changes\nFound source JS URL: ${{steps.wa_proto_info.outputs.wa_js_url}}\nCurrent version: v${{steps.wa_proto_info.outputs.wa_version}}"
+          labels: update-proto
+          body: |
+            Automated WAProto update for Phoenix Baileys V3.
+
+            WhatsApp version: `${{ steps.proto_info.outputs.wa_version }}`
+            Source JS: `${{ steps.proto_info.outputs.wa_js_url }}`
+
+            Please review the generated protocol changes before merging.
           add-paths: |
-            WAProto/*
+            WAProto/WAProto.proto
+            WAProto/index.js
+            WAProto/index.d.ts
             src/Defaults/baileys-version.json
