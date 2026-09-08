@@ -1,8 +1,8 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { exit } from 'process';
+import { fileURLToPath } from 'url';
 
-const filePath = './index.js'
-
+const filePath = fileURLToPath(new URL('./index.js', import.meta.url));
 try {
   let content = readFileSync(filePath, 'utf8')
 

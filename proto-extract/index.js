@@ -294,7 +294,8 @@ async function findAppModules() {
                     }
                   }
                 } else if (m.object.property.name === 'FLAGS') {
-                  flags.push(m.property.name.toLowerCase());
+                  const flag = m.property.name.toLowerCase();
+                  flags.push(flag === 'required' ? 'optional' : flag);
                 }
               }
             });
@@ -494,6 +495,32 @@ async function findAppModules() {
         decodedProtoMap[name] = content;
       }
     }
+  }
+
+  // Compatibility fallback:
+  // WhatsApp may omit the decoded LID migration payload definitions even
+  // though encodedMappingPayload is still used by ProtocolMessage.
+  if (!decodedProtoMap.LIDMigrationMapping) {
+    console.warn(
+      'LIDMigrationMapping missing from extracted schema, using compatibility definition.'
+    );
+
+    decodedProtoMap.LIDMigrationMapping = `message LIDMigrationMapping {
+    uint64 pn = 1;
+    uint64 assignedLid = 2;
+    optional uint64 latestLid = 3;
+}`;
+  }
+
+  if (!decodedProtoMap.LIDMigrationMappingSyncPayload) {
+    console.warn(
+      'LIDMigrationMappingSyncPayload missing from extracted schema, using compatibility definition.'
+    );
+
+    decodedProtoMap.LIDMigrationMappingSyncPayload = `message LIDMigrationMappingSyncPayload {
+    repeated LIDMigrationMapping pnToLidMappings = 1;
+    optional uint64 chatDbMigrationTimestamp = 2;
+}`;
   }
 
   const decodedProto = Object.keys(decodedProtoMap).sort();
