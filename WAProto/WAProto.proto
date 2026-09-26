@@ -1,7 +1,7 @@
 syntax = "proto3";
 package proto;
 
-/// WhatsApp Version: 2.3000.1047180487
+/// WhatsApp Version: 2.3000.1048553587
 
 message ACP2Setting {
     optional bool enabled = 1;
@@ -485,6 +485,7 @@ message BotCapabilityMetadata {
         AI_RICH_RESPONSE_REMINDERS_ENABLED = 69;
         AI_STOP_GENERATION_ENABLED = 70;
         AI_RICH_RESPONSE_3P_LINKING_CARD_ENABLED = 71;
+        HATCH_NOTIFICATION_METADATA_EVENT_ENABLED = 72;
     }
 }
 
@@ -1230,6 +1231,7 @@ message ClientPayload {
     optional int32 processingQueueSize = 46;
     repeated string pairedPeripherals = 47;
     optional bytes testIsolationId = 48;
+    optional int64 messageSts = 49;
     enum AccountType {
         DEFAULT = 0;
         GUEST = 1;
@@ -1541,6 +1543,7 @@ message ContextInfo {
     optional InstagramThreadLink instagramThreadLink = 80;
     optional AIProvenance aiProvenance = 81;
     repeated uint32 experienceIds = 82 [packed=true];
+    optional string partnerDeepLinkToken = 83;
     message AdReplyInfo {
         optional string advertiserName = 1;
         optional MediaType mediaType = 2;
@@ -1664,6 +1667,7 @@ message ContextInfo {
         optional int32 agmSubtitleStrategy = 31;
         optional int32 agmHeaderInteractionStrategy = 32;
         optional bool containsCtwaFlowsAutoLabel = 33;
+        optional string productId = 34;
         enum AdType {
             CTWA = 0;
             CAWC = 1;
@@ -2592,6 +2596,7 @@ message Message {
     optional FutureProofMessage botPlatformRegistrationSuccessMessage = 131;
     optional FutureProofMessage newsletterScheduledMessage = 132;
     optional FutureProofMessage acp2SettingMessage = 133;
+    optional FutureProofMessage audioStickerMessage = 134;
     message AlbumMessage {
         optional uint32 expectedImageCount = 2;
         optional uint32 expectedVideoCount = 3;
@@ -3476,6 +3481,7 @@ message Message {
         optional int64 messageCount = 3;
         repeated string nonHistoryReceivers = 4;
         optional int64 oldestMessageTimestampInBundle = 5;
+        optional bool includesChatTheme = 6;
     }
     
     message MessageHistoryNotice {
@@ -4242,6 +4248,9 @@ message Message {
         optional string accessibilityLabel = 22;
         optional int32 premium = 24;
         optional string emojis = 25;
+        oneof audio {
+            Message.AudioMessage audioMessage = 26;
+        }
     }
     
     message StickerPackMessage {
@@ -4380,6 +4389,7 @@ message Message {
         optional string metadataUrl = 30;
         optional VideoSourceType videoSourceType = 31;
         optional string dashManifestUrl = 33;
+        optional int64 smartThumbnailTs = 34;
         enum Attribution {
             NONE = 0;
             GIPHY = 1;
@@ -4568,6 +4578,7 @@ message MsgOpaqueData {
     message PollOption {
         optional string name = 1;
         optional string hash = 2;
+        optional string addOptionMsgKey = 3;
     }
     
     enum PollType {
@@ -4681,6 +4692,7 @@ enum MutationProps {
     SHARED_DEVICE_ALLOWLIST_ACTION = 94;
     CONTACT_MANAGER_METADATA_ACTION = 95;
     BUSINESS_FOLDER_ACTIVATION_ACTION = 96;
+    GROUP_HISTORY_TOGGLE_ACTION = 97;
     SHARE_OWN_PN = 10001;
     BUSINESS_BROADCAST_ACTION = 10002;
     AI_THREAD_DELETE_ACTION = 10003;
@@ -5362,6 +5374,7 @@ message SyncActionValue {
     optional SharedDeviceAllowlistAction sharedDeviceAllowlistAction = 94;
     optional ContactManagerMetadataAction contactManagerMetadataAction = 95;
     optional BusinessFolderActivationAction businessFolderActivationAction = 96;
+    optional GroupHistoryToggleAction groupHistoryToggleAction = 97;
     message AgentAction {
         optional string name = 1;
         optional int32 deviceId = 2;
@@ -5582,6 +5595,15 @@ message SyncActionValue {
         
     }
     
+    message GroupHistoryToggleAction {
+        optional GroupHistoryToggleMode groupHistoryToggleMode = 1;
+        enum GroupHistoryToggleMode {
+            GROUP_HISTORY_TOGGLE_MODE_UNKNOWN = 0;
+            GROUP_HISTORY_TOGGLE_MODE_ON = 1;
+            GROUP_HISTORY_TOGGLE_MODE_OFF = 2;
+        }
+    }
+    
     message InteractiveMessageAction {
         optional InteractiveMessageActionMode type = 1;
         optional string agmId = 2;
@@ -5628,6 +5650,8 @@ message SyncActionValue {
             THIRD_PARTY = 15;
             LEAD = 16;
             MENTIONS_AND_REPLIES = 17;
+            REQUESTS = 18;
+            BUSINESS = 19;
         }
     }
     
@@ -6598,7 +6622,14 @@ message WebMessageInfo {
         IDENTITY_TRUST_REVOKED = 228;
         CTWA_CONSUMER_DISCLOSURE = 230;
         CHANGE_ACP2_SETTING = 240;
+        BIZ_CALLBACK_DISABLED = 244;
+        BIZ_CALLBACK_ENABLED = 247;
         EPHEMERAL_CHANGED_FOR_COEX = 248;
+        UGC_BOT_PROFILE_UPDATED = 249;
+        ORDER_EPHEMERAL_EXEMPTION = 250;
+        CAMEO_CHAT_CREATED = 254;
+        CAMEO_TRANSITIONED = 256;
+        SENDER_SIDE_CONTACT_INFO = 255;
     }
 }
 
