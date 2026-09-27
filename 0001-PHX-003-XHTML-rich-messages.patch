@@ -1,0 +1,544 @@
+diff --git a/PHOENIX_PATCHES.md b/PHOENIX_PATCHES.md
+index a8e3ba7..fd5b705 100644
+--- a/PHOENIX_PATCHES.md
++++ b/PHOENIX_PATCHES.md
+@@ -20,6 +20,7 @@ Every Phoenix-specific modification must:
+ |---|---|---|
+ | PHX-001 | Group Leave / Remove distinction | Implemented |
+ | PHX-002 | Interactive Native Flow Buttons | Implemented |
++| PHX-003 | XHTML Rich Messages | Implemented |
+ 
+ ---
+ 
+@@ -309,6 +310,72 @@ When updating the upstream Baileys base, check whether upstream Baileys has intr
+ 
+ If upstream later provides equivalent functionality, PHX-002 should be reviewed and reduced or removed where possible.
+ 
++
++# PHX-003 - XHTML Rich Messages
++
++## Status
++
++Implemented for the next Phoenix Baileys V3 release.
++
++## Problem
++
++WhatsApp currently exposes an internal rich-response HTML primitive that can render interactive HTML, CSS and JavaScript inside a message. Upstream Baileys exposes the underlying protobuf fields but does not provide a high-level API for producing this message shape.
++
++Phoenix needs the primitive for compact interactive experiences such as the slot UI without depending on a second message-builder package.
++
++## Phoenix Behavior
++
++Phoenix Baileys V3 adds an experimental high-level `xhtml` message property:
++
++```ts
++await sock.sendMessage(jid, {
++  xhtml: {
++    html: '<button onclick="play(\'spin\')">SPIN</button>',
++    sounds: {
++      spin: './media/casino/spin.mp3'
++    },
++    volume: 1,
++    loop: false,
++    bypassDownload: true
++  }
++})
++```
++
++Sound sources may be local file paths or `Buffer` values. They are embedded into the HTML payload and exposed through `play(id)` and `stopSound(id)` in the rendered document.
++
++For inline rendering, `bypassDownload` defaults to `true` and sends one immediate message-edit refresh after the original rich message. Optional bounded retries can be configured with `bypassDownloadRetries` and `bypassDownloadIntervalMs`. Unlike builder implementations that can retry forever, Phoenix caps additional retries at 10 to avoid unbounded timers.
++
++The wire shape is based on WhatsApp's `AIRichResponseMessage` and the currently observed `GenAIaeacdsnwHtmlPrimitive` unified-response section.
++
++## Files
++
++PHX-003 modifies:
++
++- `src/Types/Message.ts`
++- `src/Utils/messages.ts`
++- `src/Utils/xhtml.ts`
++- `src/Socket/messages-send.ts`
++- `src/__tests__/Utils/phoenix-xhtml.test.ts`
++- `PHOENIX_PATCHES.md`
++
++## Tests
++
++Dedicated PHX-003 regression tests verify:
++
++- rich-response HTML primitive generation
++- response ID correlation with bot metadata
++- named Buffer sound embedding
++- `play()` bridge injection
++- sound options inside the generated HTML payload
++
++An on-device WhatsApp test is still required because this primitive is undocumented and client-controlled.
++
++## Upstream Compatibility
++
++PHX-003 is intentionally isolated behind the additive `xhtml` content type.
++
++The underlying HTML primitive is undocumented WhatsApp behavior and may change or disappear without notice. When updating WAProto or the upstream Baileys base, verify the `AIRichResponseMessage` structure and the HTML primitive typename before relying on this patch.
++
+ Patch Template
+ 
+ Future Phoenix patches should use this structure:
+diff --git a/src/Socket/messages-send.ts b/src/Socket/messages-send.ts
+index 1f7e76a..952f03a 100644
+--- a/src/Socket/messages-send.ts
++++ b/src/Socket/messages-send.ts
+@@ -1369,12 +1369,13 @@ export const makeMessagesSocket = (config: SocketConfig) => {
+ 				const isEditMsg = 'edit' in content && !!content.edit
+ 				const isPinMsg = 'pin' in content && !!content.pin
+ 				const isPollMessage = 'poll' in content && !!content.poll
++				const isXHtmlMessage = typeof content === 'object' && content !== null && 'xhtml' in content
+ 				const isInteractiveButtonsMessage =
+-	            typeof content === 'object' &&
+-	            content !== null &&
+-	            'interactiveButtons' in content &&
+-	            Array.isArray(content.interactiveButtons) &&
+-	            content.interactiveButtons.length > 0
++					typeof content === 'object' &&
++					content !== null &&
++					'interactiveButtons' in content &&
++					Array.isArray(content.interactiveButtons) &&
++					content.interactiveButtons.length > 0
+ 				const additionalAttributes: BinaryNodeAttributes = {}
+ 				const additionalNodes: BinaryNode[] = []
+ 				if (isInteractiveButtonsMessage) {
+@@ -1436,6 +1437,52 @@ export const makeMessagesSocket = (config: SocketConfig) => {
+ 					statusJidList: options.statusJidList,
+ 					additionalNodes
+ 				})
++				if (isXHtmlMessage && content.xhtml.bypassDownload !== false && fullMsg.key.id && fullMsg.message) {
++					const refreshMessage = async () => {
++						const refreshContent = proto.Message.create({
++							botForwardedMessage: {
++								message: {
++									protocolMessage: {
++										key: {
++											remoteJid: jid,
++											fromMe: true,
++											id: fullMsg.key.id
++										},
++										type: proto.Message.ProtocolMessage.Type.MESSAGE_EDIT,
++										editedMessage: fullMsg.message
++									}
++								}
++							}
++						})
++
++						await relayMessage(jid, refreshContent, {
++							messageId: generateMessageIDV2(sock.user?.id),
++							useCachedGroupMetadata: options.useCachedGroupMetadata,
++							statusJidList: options.statusJidList
++						})
++					}
++
++					const logRefreshError = (err: unknown) => logger.debug({ err, jid }, 'xhtml refresh failed')
++					await refreshMessage().catch(logRefreshError)
++
++					const retries = Math.min(10, Math.max(0, Math.trunc(content.xhtml.bypassDownloadRetries ?? 0)))
++					if (retries > 0) {
++						const intervalMs = Math.max(1_000, Math.trunc(content.xhtml.bypassDownloadIntervalMs ?? 2_000))
++						const scheduleRefresh = (remaining: number) => {
++							if (remaining <= 0) {
++								return
++							}
++
++							setTimeout(() => {
++								void refreshMessage()
++									.catch(logRefreshError)
++									.finally(() => scheduleRefresh(remaining - 1))
++							}, intervalMs)
++						}
++
++						scheduleRefresh(retries)
++					}
++				}
+ 				if (config.emitOwnEvents) {
+ 					process.nextTick(async () => {
+ 						await messageMutex.mutex(() => upsertMessage(fullMsg, 'append'))
+diff --git a/src/Types/Message.ts b/src/Types/Message.ts
+index d9ee2c4..e91c866 100644
+--- a/src/Types/Message.ts
++++ b/src/Types/Message.ts
+@@ -308,8 +308,32 @@ export type AnyRegularMessageContent = (
+ ) &
+ 	ViewOnce
+ 
++export type XHtmlSoundSource = Buffer | string
++
++export type XHtmlMessageOptions = {
++	/** HTML payload rendered by WhatsApp's rich-response HTML primitive. */
++	html: string
++	/** Single local sound source exposed as play('default'). */
++	sound?: XHtmlSoundSource
++	/** Named local sound sources exposed as play('<id>'). */
++	sounds?: Record<string, XHtmlSoundSource>
++	/** Web Audio gain, clamped to the 0..1 range. Defaults to 1. */
++	volume?: number
++	/** Default loop mode for play(). Defaults to false. */
++	loop?: boolean
++	/** Autoplay the default/first sound or a specific sound id. */
++	autoplay?: boolean | string
++	/** Send an immediate edit refresh so WhatsApp renders the rich payload inline. Defaults to true. */
++	bypassDownload?: boolean
++	/** Additional bounded refreshes after the immediate one. Defaults to 0, maximum 10. */
++	bypassDownloadRetries?: number
++	/** Delay between additional refreshes. Defaults to 2000 ms, minimum 1000 ms. */
++	bypassDownloadIntervalMs?: number
++}
++
+ export type AnyMessageContent =
+ 	| AnyRegularMessageContent
++	| { xhtml: XHtmlMessageOptions }
+ 	| {
+ 			forward: WAMessage
+ 			force?: boolean
+diff --git a/src/Utils/messages.ts b/src/Utils/messages.ts
+index 3c9bb99..b8a0056 100644
+--- a/src/Utils/messages.ts
++++ b/src/Utils/messages.ts
+@@ -41,6 +41,7 @@ import {
+ 	type MediaDownloadOptions
+ } from './messages-media'
+ import { shouldIncludeReportingToken } from './reporting-utils'
++import { generateXHtmlMessageContent } from './xhtml'
+ 
+ type ExtractByKey<T, K extends PropertyKey> = T extends Record<K, any> ? T : never
+ type RequireKey<T, K extends keyof T> = T & {
+@@ -397,9 +398,12 @@ export const generateWAMessageContent = async (
+ 	options: MessageContentGenerationOptions
+ ) => {
+ 	let m: WAMessageContent = {}
++	const isXHtmlMessage = hasNonNullishProperty(message, 'xhtml')
+ 	const isInteractiveButtonsMessage = hasNonNullishProperty(message, 'interactiveButtons')
+ 
+-	if (isInteractiveButtonsMessage) {
++	if (isXHtmlMessage) {
++		m = await generateXHtmlMessageContent(message.xhtml)
++	} else if (isInteractiveButtonsMessage) {
+ 		const buttons = message.interactiveButtons.map(button => ({
+ 			name: button.name,
+ 			buttonParamsJson:
+@@ -679,11 +683,12 @@ export const generateWAMessageContent = async (
+ 		m = await prepareWAMessageMedia(message as AnyMediaMessageContent, options)
+ 	}
+ 
+-	if (!isInteractiveButtonsMessage && hasOptionalProperty(message, 'viewOnce') && !!message.viewOnce) {
++	if (!isXHtmlMessage && !isInteractiveButtonsMessage && hasOptionalProperty(message, 'viewOnce') && !!message.viewOnce) {
+ 		m = { viewOnceMessage: { message: m } }
+ 	}
+ 
+ 	if (
++		!isXHtmlMessage &&
+ 		!isInteractiveButtonsMessage &&
+ 		((hasOptionalProperty(message, 'mentions') && message.mentions?.length) ||
+ 			(hasOptionalProperty(message, 'mentionAll') && message.mentionAll))
+@@ -718,7 +723,7 @@ export const generateWAMessageContent = async (
+ 		}
+ 	}
+ 
+-	if (!isInteractiveButtonsMessage && hasOptionalProperty(message, 'contextInfo') && !!message.contextInfo) {
++	if (!isXHtmlMessage && !isInteractiveButtonsMessage && hasOptionalProperty(message, 'contextInfo') && !!message.contextInfo) {
+ 		const messageType = Object.keys(m)[0]! as Extract<keyof proto.IMessage, MessageWithContextInfo>
+ 		const key = m[messageType]
+ 		if ('contextInfo' in key! && !!key.contextInfo) {
+diff --git a/src/Utils/xhtml.ts b/src/Utils/xhtml.ts
+new file mode 100644
+index 0000000..09d07f8
+--- /dev/null
++++ b/src/Utils/xhtml.ts
+@@ -0,0 +1,218 @@
++import { Boom } from '@hapi/boom'
++import { randomUUID } from 'crypto'
++import { promises as fs } from 'fs'
++import { isAbsolute, resolve } from 'path'
++import { proto } from '../../WAProto/index.js'
++import type { WAMessageContent, XHtmlMessageOptions, XHtmlSoundSource } from '../Types'
++
++const HTML_PRIMITIVE_TYPENAME = 'GenAIaeacdsnwHtmlPrimitive'
++const SECTION_TYPENAME = 'GenAIUnifiedResponseSection'
++const VIEW_MODEL_TYPENAME = 'GenAISingleLayoutViewModel'
++
++const loadSoundBase64 = async (source: XHtmlSoundSource) => {
++	if (Buffer.isBuffer(source)) {
++		return source.toString('base64')
++	}
++
++	const sourcePath = String(source || '')
++	if (!sourcePath) {
++		throw new Boom('xhtml sound source cannot be empty', { statusCode: 400 })
++	}
++
++	if (/^https?:\/\//i.test(sourcePath)) {
++		throw new Boom('xhtml sound sources must be local files or Buffers', { statusCode: 400 })
++	}
++
++	const absolutePath = isAbsolute(sourcePath) ? sourcePath : resolve(process.cwd(), sourcePath)
++	return (await fs.readFile(absolutePath)).toString('base64')
++}
++
++const getAutoplayId = (autoplay: XHtmlMessageOptions['autoplay'], sounds: Record<string, string>) => {
++	if (autoplay === true) {
++		return sounds.default ? 'default' : Object.keys(sounds)[0] || null
++	}
++
++	return typeof autoplay === 'string' && autoplay ? autoplay : null
++}
++
++const buildSoundScript = (
++	sounds: Record<string, string>,
++	volume: number,
++	loop: boolean,
++	autoplay: XHtmlMessageOptions['autoplay']
++) => {
++	const autoId = getAutoplayId(autoplay, sounds)
++
++	return `<script>
++(function(){
++  var SOUNDS = ${JSON.stringify(sounds)};
++  var vol = ${JSON.stringify(volume)};
++  var defaultLoop = ${loop ? 'true' : 'false'};
++  var autoId = ${JSON.stringify(autoId)};
++  var ctx = null;
++  var decoded = {};
++  var current = {};
++
++  function b64ToAB(s){
++    var bin = atob(s), n = bin.length, u = new Uint8Array(n);
++    for (var i = 0; i < n; i++) u[i] = bin.charCodeAt(i);
++    return u.buffer;
++  }
++
++  function ensureCtx(){
++    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
++    if (ctx.state === 'suspended') ctx.resume();
++    return ctx;
++  }
++
++  function stop(id){
++    try {
++      if (id) {
++        if (current[id]) { current[id].stop(0); delete current[id]; }
++      } else {
++        Object.keys(current).forEach(function(k){
++          try { current[k].stop(0); } catch(e) {}
++        });
++        current = {};
++      }
++    } catch(e) {}
++  }
++
++  function start(id, buffer, shouldLoop){
++    var c = ensureCtx();
++    stop(id);
++    var src = c.createBufferSource();
++    var gain = c.createGain();
++    gain.gain.value = vol;
++    src.buffer = buffer;
++    src.loop = !!shouldLoop;
++    src.connect(gain);
++    gain.connect(c.destination);
++    src.start(0);
++    current[id] = src;
++    src.onended = function(){ if (current[id] === src) delete current[id]; };
++  }
++
++  function play(id, opts){
++    id = id || 'default';
++    var b64 = SOUNDS[id];
++    if (!b64) return;
++    opts = opts || {};
++    var shouldLoop = opts.loop != null ? !!opts.loop : defaultLoop;
++    try {
++      ensureCtx();
++      if (decoded[id]) { start(id, decoded[id], shouldLoop); return; }
++      ctx.decodeAudioData(b64ToAB(b64), function(buffer){
++        decoded[id] = buffer;
++        start(id, buffer, shouldLoop);
++      }, function(){});
++    } catch(e) {}
++  }
++
++  window.play = play;
++  window.stopSound = stop;
++
++  function boot(){
++    if (autoId && SOUNDS[autoId]) play(autoId);
++  }
++
++  if (autoId) {
++    boot();
++    setTimeout(boot, 50);
++    setTimeout(boot, 200);
++    setTimeout(boot, 500);
++    document.body.addEventListener('touchstart', boot, { passive: true });
++    document.body.addEventListener('click', boot);
++  }
++})();
++</script>`
++}
++
++const injectSoundScript = (html: string, script: string) => {
++	if (/<\/body>/i.test(html)) {
++		return html.replace(/<\/body>/i, `${script}</body>`)
++	}
++
++	if (/<\/html>/i.test(html)) {
++		return html.replace(/<\/html>/i, `${script}</html>`)
++	}
++
++	if (/<html/i.test(html)) {
++		return `${html}${script}`
++	}
++
++	return `<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body>${html}${script}</body></html>`
++}
++
++export const generateXHtmlMessageContent = async (options: XHtmlMessageOptions): Promise<WAMessageContent> => {
++	const html = String(options.html || '').trim()
++	if (!html) {
++		throw new Boom('xhtml.html is required', { statusCode: 400 })
++	}
++
++	const soundSources: Record<string, XHtmlSoundSource> = { ...(options.sounds || {}) }
++	if (options.sound) {
++		soundSources.default = options.sound
++	}
++
++	const sounds: Record<string, string> = {}
++	for (const [id, source] of Object.entries(soundSources)) {
++		if (!id) {
++			continue
++		}
++
++		sounds[id] = await loadSoundBase64(source)
++	}
++
++	const rawVolume = Number(options.volume ?? 1)
++	const volume = Number.isFinite(rawVolume) ? Math.min(1, Math.max(0, rawVolume)) : 1
++	const payload = Object.keys(sounds).length
++		? injectSoundScript(html, buildSoundScript(sounds, volume, options.loop === true, options.autoplay))
++		: html
++	const responseId = randomUUID()
++	const unifiedResponse = {
++		response_id: responseId,
++		sections: [
++			{
++				__typename: SECTION_TYPENAME,
++				view_model: {
++					__typename: VIEW_MODEL_TYPENAME,
++					primitive: {
++						__typename: HTML_PRIMITIVE_TYPENAME,
++						trusted_sources: [],
++						payload
++					}
++				}
++			}
++		]
++	}
++
++	return proto.Message.create({
++		messageContextInfo: {
++			botMetadata: {
++				botResponseId: responseId
++			}
++		},
++		botForwardedMessage: {
++			message: {
++				richResponseMessage: {
++					messageType: proto.AIRichResponseMessageType.AI_RICH_RESPONSE_TYPE_STANDARD,
++					submessages: [
++						{
++							messageType: proto.AIRichResponseSubMessageType.AI_RICH_RESPONSE_TEXT,
++							messageText: ''
++						}
++					],
++					contextInfo: {
++						isForwarded: true,
++						forwardingScore: 1,
++						forwardOrigin: 4
++					},
++					unifiedResponse: {
++						data: Buffer.from(JSON.stringify(unifiedResponse), 'utf8')
++					}
++				}
++			}
++		}
++	})
++}
+diff --git a/src/__tests__/Utils/phoenix-xhtml.test.ts b/src/__tests__/Utils/phoenix-xhtml.test.ts
+new file mode 100644
+index 0000000..2d0c599
+--- /dev/null
++++ b/src/__tests__/Utils/phoenix-xhtml.test.ts
+@@ -0,0 +1,67 @@
++import { describe, expect, it } from '@jest/globals'
++import type { MessageContentGenerationOptions } from '../../Types'
++import { generateWAMessageContent } from '../../Utils/messages'
++
++describe('PHX-003 - XHTML rich messages', () => {
++	it('generates the WhatsApp rich-response HTML primitive', async () => {
++		const message = await generateWAMessageContent(
++			{
++				xhtml: {
++					html: '<div id="phoenix">Phoenix</div>',
++					bypassDownload: false
++				}
++			},
++			{} as MessageContentGenerationOptions
++		)
++
++		const richResponse = message.botForwardedMessage?.message?.richResponseMessage
++		expect(richResponse?.messageType).toBe(1)
++		expect(richResponse?.submessages?.[0]?.messageType).toBe(2)
++		expect(richResponse?.contextInfo?.isForwarded).toBe(true)
++		expect(richResponse?.unifiedResponse?.data).toBeDefined()
++
++		const unified = JSON.parse(Buffer.from(richResponse?.unifiedResponse?.data || []).toString('utf8'))
++		expect(typeof unified.response_id).toBe('string')
++		expect(unified.response_id).toBe(message.messageContextInfo?.botMetadata?.botResponseId)
++		expect(unified.sections).toEqual([
++			{
++				__typename: 'GenAIUnifiedResponseSection',
++				view_model: {
++					__typename: 'GenAISingleLayoutViewModel',
++					primitive: {
++						__typename: 'GenAIaeacdsnwHtmlPrimitive',
++						trusted_sources: [],
++						payload: '<div id="phoenix">Phoenix</div>'
++					}
++				}
++			}
++		])
++	})
++
++	it('embeds named Buffer sounds and exposes play() inside the HTML payload', async () => {
++		const message = await generateWAMessageContent(
++			{
++				xhtml: {
++					html: '<html><body><button onclick="play(\'spin\')">Spin</button></body></html>',
++					sounds: {
++						spin: Buffer.from('phoenix-spin')
++					},
++					volume: 0.8,
++					autoplay: 'spin',
++					bypassDownload: false
++				}
++			},
++			{} as MessageContentGenerationOptions
++		)
++
++		const data = message.botForwardedMessage?.message?.richResponseMessage?.unifiedResponse?.data
++		const unified = JSON.parse(Buffer.from(data || []).toString('utf8'))
++		const payload = unified.sections[0].view_model.primitive.payload as string
++
++		expect(payload).toContain(`var SOUNDS = {"spin":"${Buffer.from('phoenix-spin').toString('base64')}"}`)
++		expect(payload).toContain('var vol = 0.8')
++		expect(payload).toContain('var autoId = "spin"')
++		expect(payload).toContain('window.play = play')
++		expect(payload.indexOf('<script>')).toBeLessThan(payload.indexOf('</body>'))
++	})
++})

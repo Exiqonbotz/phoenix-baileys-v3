@@ -1369,12 +1369,13 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				const isEditMsg = 'edit' in content && !!content.edit
 				const isPinMsg = 'pin' in content && !!content.pin
 				const isPollMessage = 'poll' in content && !!content.poll
+				const isXHtmlMessage = typeof content === 'object' && content !== null && 'xhtml' in content
 				const isInteractiveButtonsMessage =
-	            typeof content === 'object' &&
-	            content !== null &&
-	            'interactiveButtons' in content &&
-	            Array.isArray(content.interactiveButtons) &&
-	            content.interactiveButtons.length > 0
+					typeof content === 'object' &&
+					content !== null &&
+					'interactiveButtons' in content &&
+					Array.isArray(content.interactiveButtons) &&
+					content.interactiveButtons.length > 0
 				const additionalAttributes: BinaryNodeAttributes = {}
 				const additionalNodes: BinaryNode[] = []
 				if (isInteractiveButtonsMessage) {
@@ -1436,6 +1437,52 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					statusJidList: options.statusJidList,
 					additionalNodes
 				})
+				if (isXHtmlMessage && content.xhtml.bypassDownload !== false && fullMsg.key.id && fullMsg.message) {
+					const refreshMessage = async () => {
+						const refreshContent = proto.Message.create({
+							botForwardedMessage: {
+								message: {
+									protocolMessage: {
+										key: {
+											remoteJid: jid,
+											fromMe: true,
+											id: fullMsg.key.id
+										},
+										type: proto.Message.ProtocolMessage.Type.MESSAGE_EDIT,
+										editedMessage: fullMsg.message
+									}
+								}
+							}
+						})
+
+						await relayMessage(jid, refreshContent, {
+							messageId: generateMessageIDV2(sock.user?.id),
+							useCachedGroupMetadata: options.useCachedGroupMetadata,
+							statusJidList: options.statusJidList
+						})
+					}
+
+					const logRefreshError = (err: unknown) => logger.debug({ err, jid }, 'xhtml refresh failed')
+					await refreshMessage().catch(logRefreshError)
+
+					const retries = Math.min(10, Math.max(0, Math.trunc(content.xhtml.bypassDownloadRetries ?? 0)))
+					if (retries > 0) {
+						const intervalMs = Math.max(1_000, Math.trunc(content.xhtml.bypassDownloadIntervalMs ?? 2_000))
+						const scheduleRefresh = (remaining: number) => {
+							if (remaining <= 0) {
+								return
+							}
+
+							setTimeout(() => {
+								void refreshMessage()
+									.catch(logRefreshError)
+									.finally(() => scheduleRefresh(remaining - 1))
+							}, intervalMs)
+						}
+
+						scheduleRefresh(retries)
+					}
+				}
 				if (config.emitOwnEvents) {
 					process.nextTick(async () => {
 						await messageMutex.mutex(() => upsertMessage(fullMsg, 'append'))

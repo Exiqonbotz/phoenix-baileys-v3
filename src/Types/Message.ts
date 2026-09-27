@@ -308,8 +308,32 @@ export type AnyRegularMessageContent = (
 ) &
 	ViewOnce
 
+export type XHtmlSoundSource = Buffer | string
+
+export type XHtmlMessageOptions = {
+	/** HTML payload rendered by WhatsApp's rich-response HTML primitive. */
+	html: string
+	/** Single local sound source exposed as play('default'). */
+	sound?: XHtmlSoundSource
+	/** Named local sound sources exposed as play('<id>'). */
+	sounds?: Record<string, XHtmlSoundSource>
+	/** Web Audio gain, clamped to the 0..1 range. Defaults to 1. */
+	volume?: number
+	/** Default loop mode for play(). Defaults to false. */
+	loop?: boolean
+	/** Autoplay the default/first sound or a specific sound id. */
+	autoplay?: boolean | string
+	/** Send an immediate edit refresh so WhatsApp renders the rich payload inline. Defaults to true. */
+	bypassDownload?: boolean
+	/** Additional bounded refreshes after the immediate one. Defaults to 0, maximum 10. */
+	bypassDownloadRetries?: number
+	/** Delay between additional refreshes. Defaults to 2000 ms, minimum 1000 ms. */
+	bypassDownloadIntervalMs?: number
+}
+
 export type AnyMessageContent =
 	| AnyRegularMessageContent
+	| { xhtml: XHtmlMessageOptions }
 	| {
 			forward: WAMessage
 			force?: boolean

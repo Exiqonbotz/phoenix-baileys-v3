@@ -20,6 +20,7 @@ Every Phoenix-specific modification must:
 |---|---|---|
 | PHX-001 | Group Leave / Remove distinction | Implemented |
 | PHX-002 | Interactive Native Flow Buttons | Implemented |
+| PHX-003 | XHTML Rich Messages | Implemented |
 
 ---
 
@@ -308,6 +309,72 @@ PHX-002 should remain isolated from the normal Baileys message generation path.
 When updating the upstream Baileys base, check whether upstream Baileys has introduced an equivalent high-level Native Flow button API.
 
 If upstream later provides equivalent functionality, PHX-002 should be reviewed and reduced or removed where possible.
+
+
+# PHX-003 - XHTML Rich Messages
+
+## Status
+
+Implemented for the next Phoenix Baileys V3 release.
+
+## Problem
+
+WhatsApp currently exposes an internal rich-response HTML primitive that can render interactive HTML, CSS and JavaScript inside a message. Upstream Baileys exposes the underlying protobuf fields but does not provide a high-level API for producing this message shape.
+
+Phoenix needs the primitive for compact interactive experiences such as the slot UI without depending on a second message-builder package.
+
+## Phoenix Behavior
+
+Phoenix Baileys V3 adds an experimental high-level `xhtml` message property:
+
+```ts
+await sock.sendMessage(jid, {
+  xhtml: {
+    html: '<button onclick="play(\'spin\')">SPIN</button>',
+    sounds: {
+      spin: './media/casino/spin.mp3'
+    },
+    volume: 1,
+    loop: false,
+    bypassDownload: true
+  }
+})
+```
+
+Sound sources may be local file paths or `Buffer` values. They are embedded into the HTML payload and exposed through `play(id)` and `stopSound(id)` in the rendered document.
+
+For inline rendering, `bypassDownload` defaults to `true` and sends one immediate message-edit refresh after the original rich message. Optional bounded retries can be configured with `bypassDownloadRetries` and `bypassDownloadIntervalMs`. Unlike builder implementations that can retry forever, Phoenix caps additional retries at 10 to avoid unbounded timers.
+
+The wire shape is based on WhatsApp's `AIRichResponseMessage` and the currently observed `GenAIaeacdsnwHtmlPrimitive` unified-response section.
+
+## Files
+
+PHX-003 modifies:
+
+- `src/Types/Message.ts`
+- `src/Utils/messages.ts`
+- `src/Utils/xhtml.ts`
+- `src/Socket/messages-send.ts`
+- `src/__tests__/Utils/phoenix-xhtml.test.ts`
+- `PHOENIX_PATCHES.md`
+
+## Tests
+
+Dedicated PHX-003 regression tests verify:
+
+- rich-response HTML primitive generation
+- response ID correlation with bot metadata
+- named Buffer sound embedding
+- `play()` bridge injection
+- sound options inside the generated HTML payload
+
+An on-device WhatsApp test is still required because this primitive is undocumented and client-controlled.
+
+## Upstream Compatibility
+
+PHX-003 is intentionally isolated behind the additive `xhtml` content type.
+
+The underlying HTML primitive is undocumented WhatsApp behavior and may change or disappear without notice. When updating WAProto or the upstream Baileys base, verify the `AIRichResponseMessage` structure and the HTML primitive typename before relying on this patch.
 
 Patch Template
 

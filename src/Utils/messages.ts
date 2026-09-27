@@ -41,6 +41,7 @@ import {
 	type MediaDownloadOptions
 } from './messages-media'
 import { shouldIncludeReportingToken } from './reporting-utils'
+import { generateXHtmlMessageContent } from './xhtml'
 
 type ExtractByKey<T, K extends PropertyKey> = T extends Record<K, any> ? T : never
 type RequireKey<T, K extends keyof T> = T & {
@@ -397,9 +398,12 @@ export const generateWAMessageContent = async (
 	options: MessageContentGenerationOptions
 ) => {
 	let m: WAMessageContent = {}
+	const isXHtmlMessage = hasNonNullishProperty(message, 'xhtml')
 	const isInteractiveButtonsMessage = hasNonNullishProperty(message, 'interactiveButtons')
 
-	if (isInteractiveButtonsMessage) {
+	if (isXHtmlMessage) {
+		m = await generateXHtmlMessageContent(message.xhtml)
+	} else if (isInteractiveButtonsMessage) {
 		const buttons = message.interactiveButtons.map(button => ({
 			name: button.name,
 			buttonParamsJson:
@@ -679,11 +683,12 @@ export const generateWAMessageContent = async (
 		m = await prepareWAMessageMedia(message as AnyMediaMessageContent, options)
 	}
 
-	if (!isInteractiveButtonsMessage && hasOptionalProperty(message, 'viewOnce') && !!message.viewOnce) {
+	if (!isXHtmlMessage && !isInteractiveButtonsMessage && hasOptionalProperty(message, 'viewOnce') && !!message.viewOnce) {
 		m = { viewOnceMessage: { message: m } }
 	}
 
 	if (
+		!isXHtmlMessage &&
 		!isInteractiveButtonsMessage &&
 		((hasOptionalProperty(message, 'mentions') && message.mentions?.length) ||
 			(hasOptionalProperty(message, 'mentionAll') && message.mentionAll))
@@ -718,7 +723,7 @@ export const generateWAMessageContent = async (
 		}
 	}
 
-	if (!isInteractiveButtonsMessage && hasOptionalProperty(message, 'contextInfo') && !!message.contextInfo) {
+	if (!isXHtmlMessage && !isInteractiveButtonsMessage && hasOptionalProperty(message, 'contextInfo') && !!message.contextInfo) {
 		const messageType = Object.keys(m)[0]! as Extract<keyof proto.IMessage, MessageWithContextInfo>
 		const key = m[messageType]
 		if ('contextInfo' in key! && !!key.contextInfo) {
